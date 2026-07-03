@@ -1,0 +1,21 @@
+# Render.com Blueprint
+services:
+  - type: web
+    name: sportsai-bot
+    env: docker
+    repo: https://github.com/YOUR_USERNAME/sportsai-bot.git
+    branch: main
+    plan: free
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: FOOTBALL_DATA_API_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DB_PATH
+        value: /data/bot_history.db
+    healthCheckPath: /
+    # Render Web Service требует открытого порта,
+    # поэтому запускаем простой health-check HTTP сервер на порту 10000
+    # и бота в фоновом потоке
