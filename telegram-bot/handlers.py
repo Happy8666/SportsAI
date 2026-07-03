@@ -223,9 +223,10 @@ async def cb_tournament_matches(callback: CallbackQuery) -> None:
         parse_mode=ParseMode.HTML,
     )
 
-    matches = await football_client.get_upcoming_matches(code, limit=8)
+    block = await football_client.get_upcoming_matches(code)
 
-    if not matches:
+    text = _format_matches_block(block, comp_name)
+    if text is None:
         await callback.message.edit_text(
             f"📭 <b>{comp_name}</b> — нет ближайших матчей в базе.\n"
             f"Возможно, сезон ещё не начался или завершился.",
@@ -238,37 +239,10 @@ async def cb_tournament_matches(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
-    lines = [f"📅 <b>{comp_name} — ближайшие матчи:</b>\n"]
-    for match in matches:
-        home = match["homeTeam"].get("shortName") or match["homeTeam"].get("name", "?")
-        away = match["awayTeam"].get("shortName") or match["awayTeam"].get("name", "?")
-        utc_date = match.get("utcDate", "")
-        status = match.get("status", "")
-        score = match.get("score", {}).get("fullTime", {})
-
-        try:
-            dt = datetime.datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
-            date_str = dt.strftime("%d.%m %H:%M")
-        except (ValueError, TypeError):
-            date_str = utc_date[:16] if utc_date else "?"
-
-        status_emoji = "🟢" if status == "LIVE" else ("✅" if status == "FINISHED" else "⏳")
-        score_str = ""
-        if status == "FINISHED" and score.get("home") is not None:
-            score_str = f"  <b>{score['home']}–{score['away']}</b>"
-        elif status == "LIVE" and score.get("home") is not None:
-            score_str = f"  🔴 <b>{score['home']}–{score['away']}</b>"
-
-        lines.append(
-            f"{status_emoji} <b>{home}</b> — <b>{away}</b>{score_str}\n"
-            f"   📆 {date_str} (МСК)"
-        )
-
-    lines.append("")
-    lines.append("<i>Скопируй названия команд и отправь их в чат для прогноза</i>")
+    text += "\n\n<i>Скопируй названия команд и отправь их в чат для прогноза</i>"
 
     await callback.message.edit_text(
-        "\n".join(lines),
+        text,
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 К турнирам", callback_data="menu:tournaments")],
@@ -492,47 +466,76 @@ async def _predict_and_respond(message: Message, team1_name: str, team2_name: st
         )
 
 
+def _format_matches_block(block: dict[str, list[dict[str, Any]]], comp_name: str) -> str | None:
+    """Форматирует блоки матчей в текст. Возвращает None если матчей нет."""
+    lines: list[str] = []
+    header_added = False
+
+    if block.get("upcoming"):
+        lines.append(f"📅 <b>{comp_name} — предстоящие матчи:</b>")
+        header_added = True
+        for match in block["upcoming"]:
+            lines.append(_format_single_match(match))
+
+    if block.get("recent"):
+        if header_added:
+            lines.append("")
+        lines.append(f"📊 <b>Последние результаты:</b>")
+        for match in block["recent"]:
+            lines.append(_format_single_match(match))
+
+    if not lines:
+        return None
+
+    lines.append("")
+    lines.append("<i>Скопируй названия и отправь в чат → получишь прогноз</i>")
+    return "\n".join(lines)
+
+
+def _format_single_match(match: dict[str, Any]) -> str:
+    """Форматирует один матч в строку."""
+    home = match["homeTeam"].get("shortName") or match["homeTeam"].get("name", "?")
+    away = match["awayTeam"].get("shortName") or match["awayTeam"].get("name", "?")
+    utc_date = match.get("utcDate", "")
+    status = match.get("status", "")
+    score = match.get("score", {}).get("fullTime", {})
+
+    try:
+        dt = datetime.datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
+        date_str = dt.strftime("%d.%m %H:%M")
+    except (ValueError, TypeError):
+        date_str = utc_date[:16] if utc_date else "?"
+
+    if status in ("LIVE", "IN_PLAY"):
+        status_emoji = "🟢"
+    elif status == "FINISHED":
+        status_emoji = "✅"
+    else:
+        status_emoji = "⏳"
+
+    score_str = ""
+    if status == "FINISHED" and score.get("home") is not None:
+        score_str = f"  <b>{score['home']}–{score['away']}</b>"
+    elif status in ("LIVE", "IN_PLAY") and score.get("home") is not None:
+        score_str = f"  🔴 <b>{score['home']}–{score['away']}</b>"
+
+    return f"{status_emoji} <b>{home}</b> — <b>{away}</b>{score_str}\n   📆 {date_str} (МСК)"
+
+
 async def _show_matches(message: Message, code: str, comp_name: str) -> None:
     """Показывает матчи турнира."""
-    matches = await football_client.get_upcoming_matches(code, limit=8)
+    block = await football_client.get_upcoming_matches(code)
 
-    if not matches:
+    text = _format_matches_block(block, comp_name)
+    if text is None:
         await message.answer(
-            f"📭 <b>{comp_name}</b> — нет ближайших матчей в базе.",
+            f"📭 <b>{comp_name}</b> — нет ближайших матчей в базе.\n"
+            f"Возможно, сезон ещё не начался или завершился.",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    lines = [f"📅 <b>{comp_name} — ближайшие матчи:</b>\n"]
-    for match in matches:
-        home = match["homeTeam"].get("shortName") or match["homeTeam"].get("name", "?")
-        away = match["awayTeam"].get("shortName") or match["awayTeam"].get("name", "?")
-        utc_date = match.get("utcDate", "")
-        status = match.get("status", "")
-        score = match.get("score", {}).get("fullTime", {})
-
-        try:
-            dt = datetime.datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
-            date_str = dt.strftime("%d.%m %H:%M")
-        except (ValueError, TypeError):
-            date_str = utc_date[:16] if utc_date else "?"
-
-        status_emoji = "🟢" if status == "LIVE" else ("✅" if status == "FINISHED" else "⏳")
-        score_str = ""
-        if status == "FINISHED" and score.get("home") is not None:
-            score_str = f"  <b>{score['home']}–{score['away']}</b>"
-        elif status == "LIVE" and score.get("home") is not None:
-            score_str = f"  🔴 <b>{score['home']}–{score['away']}</b>"
-
-        lines.append(
-            f"{status_emoji} <b>{home}</b> — <b>{away}</b>{score_str}\n"
-            f"   📆 {date_str} (МСК)"
-        )
-
-    lines.append("")
-    lines.append("<i>Скопируй названия и отправь в чат → получишь прогноз</i>")
-
-    await message.answer("\n".join(lines), parse_mode=ParseMode.HTML)
+    await message.answer(text, parse_mode=ParseMode.HTML)
 
 
 async def _do_prediction(

@@ -217,33 +217,43 @@ class FootballDataClient:
             return data["matches"][:limit]
         return []
 
-    async def get_upcoming_matches(self, competition_code: str, limit: int = 10) -> list[dict[str, Any]]:
+    async def get_upcoming_matches(self, competition_code: str, limit: int = 20) -> dict[str, list[dict[str, Any]]]:
         """
-        Получает ближайшие матчи турнира (SCHEDULED + LIVE + FINISHED недавние).
+        Получает матчи турнира, разделяя на предстоящие (SCHEDULED/LIVE) и
+        последние результаты (FINISHED за 7 дней).
         """
         logger.info("Получение матчей турнира: %s", competition_code)
         data = await self._request(
             f"/competitions/{competition_code}/matches",
             params={"limit": str(limit)},
         )
+        result: dict[str, list[dict[str, Any]]] = {"upcoming": [], "recent": []}
         if data and data.get("matches"):
-            result: list[dict[str, Any]] = []
             now = datetime.datetime.now(datetime.timezone.utc)
             for match in data["matches"]:
+                status = match.get("status", "")
                 utc_date = match.get("utcDate", "")
+                match_dt: datetime.datetime | None = None
                 if utc_date:
                     try:
                         match_dt = datetime.datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
-                        # Показываем матчи за последние 7 дней + будущие
-                        if match_dt > now - datetime.timedelta(days=7):
-                            result.append(match)
                     except (ValueError, TypeError):
-                        result.append(match)
-                else:
-                    result.append(match)
-            logger.info("Найдено %d матчей для %s", len(result), competition_code)
-            return result[:limit]
-        return []
+                        pass
+
+                if status in ("SCHEDULED", "TIMED", "LIVE", "IN_PLAY", "PAUSED"):
+                    result["upcoming"].append(match)
+                elif status == "FINISHED" and match_dt and match_dt > now - datetime.timedelta(days=7):
+                    result["recent"].append(match)
+
+            # Сортируем upcoming по дате (ближайшие сверху), recent — от новых к старым
+            result["upcoming"].sort(key=lambda m: m.get("utcDate", ""))
+            result["recent"].sort(key=lambda m: m.get("utcDate", ""), reverse=True)
+            result["recent"] = result["recent"][:5]
+
+            total = len(result["upcoming"]) + len(result["recent"])
+            logger.info("Найдено матчей для %s: %d предстоящих, %d завершённых", competition_code, len(result["upcoming"]), len(result["recent"]))
+
+        return result
 
     async def search_matches_by_teams(
         self, team1_name: str, team2_name: str
