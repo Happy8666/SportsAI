@@ -197,3 +197,84 @@ def translate_team_name(name: str) -> str:
     """
     key = name.strip().lower()
     return TEAM_NAME_MAP.get(key, name)
+
+
+# Маппинг русских названий турниров → коды Football-Data.org
+COMPETITION_MAP: dict[str, str] = {
+    "чм": "WC",
+    "чемпионат мира": "WC",
+    "world cup": "WC",
+    "чм 2026": "WC",
+    "лч": "CL",
+    "лига чемпионов": "CL",
+    "champions league": "CL",
+    "ле": "EL",
+    "лига европы": "EL",
+    "europa league": "EL",
+    "апл": "PL",
+    "премьер лига": "PL",
+    "premier league": "PL",
+    "примера": "PD",
+    "ла лига": "PD",
+    "la liga": "PD",
+    "серия а": "SA",
+    "serie a": "SA",
+    "бундеслига": "BL1",
+    "bundesliga": "BL1",
+    "лига 1": "FL1",
+    "ligue 1": "FL1",
+    "евро": "EC",
+    "чемпионат европы": "EC",
+    "european championship": "EC",
+    "чемпионшип": "ELC",
+    "championship": "ELC",
+    "эредивизи": "DED",
+    "eredivisie": "DED",
+    "суперлига": "BSA",
+    "бразилия": "BSA",
+    "млс": "MLS",
+    "лига наций": "UNL",
+    "nations league": "UNL",
+    "лига 1 россия": "RFPL",
+    "рфпл": "RFPL",
+}
+
+# Человеческие названия турниров для отображения
+COMPETITION_NAMES: dict[str, str] = {
+    "WC": "Чемпионат мира",
+    "CL": "Лига чемпионов УЕФА",
+    "EL": "Лига Европы УЕФА",
+    "PL": "АПЛ (Премьер-лига)",
+    "PD": "Ла Лига (Примера)",
+    "SA": "Серия А",
+    "BL1": "Бундеслига",
+    "FL1": "Лига 1",
+    "EC": "Чемпионат Европы",
+    "ELC": "Чемпионшип",
+    "DED": "Эредивизи",
+    "BSA": "Бразильская Серия А",
+    "MLS": "MLS",
+    "UNL": "Лига наций УЕФА",
+    "RFPL": "РФПЛ",
+}
+
+
+def translate_competition(name: str) -> str | None:
+    """
+    Переводит русское название турнира в код Football-Data.org.
+    Если перевода нет — возвращает None.
+    """
+    key = name.strip().lower()
+    # Сначала ищем в словаре
+    if key in COMPETITION_MAP:
+        return COMPETITION_MAP[key]
+    # Ищем частичное совпадение
+    for k, v in COMPETITION_MAP.items():
+        if k in key or key in k:
+            return v
+    return None
+
+
+def get_competition_name(code: str) -> str:
+    """Возвращает человеческое название турнира по коду."""
+    return COMPETITION_NAMES.get(code, code)

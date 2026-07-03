@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import time
 from typing import Any
 
@@ -215,6 +216,74 @@ class FootballDataClient:
         if data and data.get("matches"):
             return data["matches"][:limit]
         return []
+
+    async def get_upcoming_matches(self, competition_code: str, limit: int = 10) -> list[dict[str, Any]]:
+        """
+        Получает ближайшие матчи турнира (SCHEDULED + LIVE + FINISHED недавние).
+        """
+        logger.info("Получение матчей турнира: %s", competition_code)
+        data = await self._request(
+            f"/competitions/{competition_code}/matches",
+            params={"limit": str(limit)},
+        )
+        if data and data.get("matches"):
+            result: list[dict[str, Any]] = []
+            now = datetime.datetime.now(datetime.timezone.utc)
+            for match in data["matches"]:
+                utc_date = match.get("utcDate", "")
+                if utc_date:
+                    try:
+                        match_dt = datetime.datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
+                        # Показываем матчи за последние 7 дней + будущие
+                        if match_dt > now - datetime.timedelta(days=7):
+                            result.append(match)
+                    except (ValueError, TypeError):
+                        result.append(match)
+                else:
+                    result.append(match)
+            logger.info("Найдено %d матчей для %s", len(result), competition_code)
+            return result[:limit]
+        return []
+
+    async def search_matches_by_teams(
+        self, team1_name: str, team2_name: str
+    ) -> dict[str, Any] | None:
+        """
+        Ищет конкретный матч между двумя командами.
+        Возвращает ближайший SCHEDULED, LIVE или недавний FINISHED матч.
+        """
+        from team_mapping import translate_team_name
+
+        t1 = await self.search_team(translate_team_name(team1_name))
+        t2 = await self.search_team(translate_team_name(team2_name))
+
+        if not t1 or not t2:
+            return None
+
+        # Ищем ближайший матч между ними (все статусы)
+        data = await self._request(
+            "/matches",
+            params={
+                "team_ids": f"{t1['id']},{t2['id']}",
+                "limit": "5",
+            },
+        )
+        if data and data.get("matches"):
+            now = datetime.datetime.now(datetime.timezone.utc)
+            for match in data["matches"]:
+                utc_date = match.get("utcDate", "")
+                if utc_date:
+                    try:
+                        match_dt = datetime.datetime.fromisoformat(utc_date.replace("Z", "+00:00"))
+                        # Ближайший будущий или недавний матч
+                        if match_dt > now - datetime.timedelta(days=30):
+                            return match
+                    except (ValueError, TypeError):
+                        pass
+            # Если нет подходящих — берём последний
+            return data["matches"][0]
+
+        return None
 
 
 # Глобальный экземпляр клиента
