@@ -111,15 +111,77 @@ class FootballDataClient:
     async def search_team(self, name: str) -> dict[str, Any] | None:
         """
         Поиск команды по названию.
-        Возвращает первый найденный результат или None.
+        Сначала пробует перевести русское название в английское.
+        Затем ищет лучший результат, проверяя схожесть названий.
+        Возвращает лучший результат или None.
         """
-        logger.info("Поиск команды: %s", name)
-        data = await self._request("/teams", params={"name": name})
+        from team_mapping import translate_team_name
+
+        # Переводим русское название в английское
+        search_name = translate_team_name(name)
+        logger.info("Поиск команды: %s → %s", name, search_name)
+
+        data = await self._request("/teams", params={"name": search_name})
         if data and data.get("teams"):
-            team = data["teams"][0]
-            logger.info("Найдена команда: %s (ID: %d)", team.get("name"), team.get("id"))
-            return team
+            teams = data["teams"]
+            # Ищем лучший результат по схожести названия
+            best = self._find_best_match(teams, search_name)
+            if best:
+                logger.info("Найдена команда: %s (ID: %d)", best.get("name"), best.get("id"))
+                return best
+
+        # Если через перевод не нашли — пробуем оригинальное название
+        if search_name != name:
+            logger.info("Повторный поиск с оригинальным названием: %s", name)
+            data = await self._request("/teams", params={"name": name})
+            if data and data.get("teams"):
+                best = self._find_best_match(data["teams"], name)
+                if best:
+                    logger.info("Найдена команда: %s (ID: %d)", best.get("name"), best.get("id"))
+                    return best
+
         return None
+
+    @staticmethod
+    def _find_best_match(teams: list[dict[str, Any]], query: str) -> dict[str, Any] | None:
+        """
+        Выбирает лучший результат из списка команд по схожести названия с запросом.
+        Если все результаты сильно отличаются — возвращает None.
+        """
+        if not teams:
+            return None
+
+        query_lower = query.lower()
+        best_team = None
+        best_score = 0
+
+        for team in teams:
+            name = (team.get("name") or "").lower()
+            short_name = (team.get("shortName") or "").lower()
+
+            # Простая оценка схожести: сколько слов запроса содержится в названии команды
+            query_words = set(query_lower.split())
+            name_words = set(name.split())
+            short_words = set(short_name.split())
+
+            common_with_name = len(query_words & name_words)
+            common_with_short = len(query_words & short_words)
+            score = max(common_with_name, common_with_short)
+
+            if score > best_score:
+                best_score = score
+                best_team = team
+
+        # Требуем хотя бы 1 совпадающее слово или точное совпадение хотя бы одного слова
+        if best_score == 0 and query_lower not in (best_team.get("name", "").lower(), (best_team.get("shortName", "").lower())):
+            logger.warning(
+                "Слабые совпадения для '%s'. Лучший: %s (score=%d)",
+                query, best_team.get("name"), best_score,
+            )
+            # Если вообще нет совпадений — возвращаем None вместо мусора
+            return None
+
+        return best_team
 
     async def get_team_matches(self, team_id: int, limit: int = 5, status: str = "FINISHED") -> list[dict[str, Any]]:
         """
